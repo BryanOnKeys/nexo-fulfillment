@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      nestjs: { patterns: ['@nestjs/*'] }
+      mikro-orm: { patterns: ['@mikro-orm/*'] }
+      aws: { patterns: ['@aws-sdk/*'] }
+  - package-ecosystem: docker
+    directory: /infra/docker
+    schedule: { interval: monthly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }

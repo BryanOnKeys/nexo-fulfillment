@@ -1,0 +1,10 @@
+.git
+node_modules
+**/node_modules
+**/dist
+dist
+.env
+.env.*
+*.zip
+coverage
+test-results

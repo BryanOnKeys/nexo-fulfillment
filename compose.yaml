@@ -1,0 +1,127 @@
+name: nexo
+x-runtime: &runtime
+  image: nexo-server:local
+  build:
+    context: .
+    dockerfile: infra/docker/Dockerfile.server
+  env_file: .env
+  environment: &environment
+    NODE_ENV: development
+    WEB_ORIGIN: http://localhost:5173
+    AWS_ENDPOINT_URL: http://moto:5000
+    S3_PUBLIC_ENDPOINT: http://localhost:5000
+    OPERATIONS_DATABASE_URL: postgresql://nexo_operations:${PG_OPERATIONS_PASSWORD:?Ejecuta node scripts/setup.mjs}@postgres:5432/nexo_operations
+    DOCUMENTS_DATABASE_URL: postgresql://nexo_documents:${PG_DOCUMENTS_PASSWORD:?Ejecuta node scripts/setup.mjs}@postgres:5432/nexo_documents
+    NOTIFICATIONS_DATABASE_URL: postgresql://nexo_notifications:${PG_NOTIFICATIONS_PASSWORD:?Ejecuta node scripts/setup.mjs}@postgres:5432/nexo_notifications
+    DOCUMENTS_QUEUE_URL: http://moto:5000/123456789012/nexo-documents
+    NOTIFICATIONS_QUEUE_URL: http://moto:5000/123456789012/nexo-notifications
+  init: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: [/tmp]
+services:
+  postgres:
+    image: postgres:17-alpine
+    env_file: .env
+    environment:
+      POSTGRES_USER: postgres
+    ports: [127.0.0.1:5432:5432]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/init-databases.sh:/docker-entrypoint-initdb.d/01-nexo.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  moto:
+    image: motoserver/moto:5.2.2
+    ports: [127.0.0.1:5000:5000]
+    environment:
+      MOTO_PORT: '5000'
+    healthcheck:
+      test:
+        [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:5000')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  bootstrap:
+    <<: *runtime
+    command: [node, scripts/initialize.mjs]
+    depends_on:
+      postgres: { condition: service_healthy }
+      moto: { condition: service_healthy }
+  operations:
+    <<: *runtime
+    environment:
+      <<: *environment
+      NEXO_SERVICE: operations
+    ports: [127.0.0.1:3001:3001]
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  documents:
+    <<: *runtime
+    environment:
+      <<: *environment
+      NEXO_SERVICE: documents
+    ports: [127.0.0.1:3002:3002]
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3002/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  notifications:
+    <<: *runtime
+    environment:
+      <<: *environment
+      NEXO_SERVICE: notifications
+    ports: [127.0.0.1:3003:3003]
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3003/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+    ports: [127.0.0.1:5173:8080]
+    depends_on:
+      operations: { condition: service_healthy }
+      documents: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://localhost:8080/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  postgres_data:

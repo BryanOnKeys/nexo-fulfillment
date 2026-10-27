@@ -1,0 +1,23 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package*.json ./
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci --ignore-scripts
+COPY tsconfig.json ./
+COPY packages packages
+COPY apps apps
+COPY scripts scripts
+COPY test test
+RUN npm run build:server
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package*.json ./
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+COPY --from=build --chown=node:node /app/dist dist
+COPY --chown=node:node scripts/run-service.mjs scripts/initialize.mjs scripts/
+USER node
+EXPOSE 3001 3002 3003
+CMD ["node","scripts/run-service.mjs"]
